@@ -2250,6 +2250,11 @@ view_update_app_id(struct view *view)
 {
 	assert(view);
 	const char *app_id = view_get_string_prop(view, "app_id");
+        // for jokes
+        if (!strcmp(app_id, "")) {
+          wlr_foreign_toplevel_handle_v1_set_app_id(view->toplevel.handle, "Spotify");
+          return;
+        }
 	if (!view->toplevel.handle || !app_id) {
 		return;
 	}

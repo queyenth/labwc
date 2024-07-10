@@ -1,5 +1,9 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _POSIX_C_SOURCE 200809L
+#include <xkbcommon/xkbcommon.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <stdio.h>
 #include <assert.h>
 #include <stdlib.h>
 #include <wlr/backend/multi.h>
@@ -115,6 +119,29 @@ keyboard_modifiers_notify(struct wl_listener *listener, void *data)
 		wlr_seat_keyboard_notify_modifiers(seat->seat,
 			&wlr_keyboard->modifiers);
 	}
+
+        int q_fifo = open("/tmp/labwc.fifo", O_WRONLY | O_NONBLOCK);
+        char msg[128];
+        int len = snprintf(msg, 128, "{\"mods\": %u}\n", wlr_keyboard_get_modifiers(keyboard->wlr_keyboard));
+        write(q_fifo, msg, len);
+
+        if (keyboard->wlr_keyboard->modifiers.group != keyboard->effective_layout) {
+          keyboard->effective_layout = keyboard->wlr_keyboard->modifiers.group;
+          struct xkb_keymap *keymap = keyboard->wlr_keyboard->keymap;
+          struct xkb_state *state = keyboard->wlr_keyboard->xkb_state;
+          xkb_layout_index_t num_layouts = xkb_keymap_num_layouts(keymap);
+          xkb_layout_index_t layout_idx;
+          for (layout_idx = 0; layout_idx < num_layouts; layout_idx++) {
+            bool is_active = xkb_state_layout_index_is_active(state, layout_idx, XKB_STATE_LAYOUT_EFFECTIVE);
+            if (is_active) {
+              len = snprintf(msg, 128, "{\"layout\": %u}\n", (unsigned)layout_idx);
+              write(q_fifo, msg, len);
+              break;
+            }
+          }
+        }
+
+        close(q_fifo);
 }
 
 static struct keybind *

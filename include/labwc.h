@@ -90,7 +90,8 @@ struct keyboard {
 	/* key repeat for compositor keybinds */
 	uint32_t keybind_repeat_keycode;
 	int32_t keybind_repeat_rate;
-	struct wl_event_source *keybind_repeat;
+        struct wl_event_source *keybind_repeat;
+        xkb_layout_index_t effective_layout;
 };
 
 struct seat {

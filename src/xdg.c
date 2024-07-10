@@ -1,10 +1,13 @@
 // SPDX-License-Identifier: GPL-2.0-only
 
 #include <assert.h>
+#include <fcntl.h>
+#include <wayland-util.h>
 #include <wlr/types/wlr_fractional_scale_v1.h>
 
 #include "common/macros.h"
 #include "common/mem.h"
+#include "common/string-helpers.h"
 #include "decorations.h"
 #include "labwc.h"
 #include "node.h"
@@ -16,6 +19,36 @@
 
 #define LAB_XDG_SHELL_VERSION (2)
 #define CONFIGURE_TIMEOUT_MS 100
+
+static void
+update_fifo_after_action(struct server *server)
+{
+  char msg[8192];
+  strcpy(msg, "{\"workspaces\":[");
+  struct workspace *curr_workspace;
+  wl_list_for_each(curr_workspace, &rc.workspace_config.workspaces, link) {
+    // check for empty and for focus
+    int mask = 0;
+    char mask_msg[256];
+    struct view *view;
+    for_each_view(view, &server->views, LAB_VIEW_CRITERIA_NONE) {
+      if (!strcmp(view->workspace->name, curr_workspace->name)) {
+        mask |= 1;
+        break;
+      }
+    }
+    if (!strcmp(server->workspace_current->name, curr_workspace->name)) {
+      mask |= 2;
+    }
+    snprintf(mask_msg, 256, "{\"name\": \"%s\", \"status\": %d},", curr_workspace->name, mask);
+    strcat(msg, mask_msg);
+  };
+  trim_last_field(msg, ',');
+  strcat(msg, "]}\n");
+  int q_fifo = open("/tmp/labwc.fifo", O_WRONLY | O_NONBLOCK);
+  write(q_fifo, msg, strlen(msg));
+  close(q_fifo);
+}
 
 static struct xdg_toplevel_view *
 xdg_toplevel_view_from_view(struct view *view)
@@ -220,7 +253,9 @@ handle_destroy(struct wl_listener *listener, void *data)
 		view->pending_configure_timeout = NULL;
 	}
 
+        struct server *server = view->server;
 	view_destroy(view);
+        update_fifo_after_action(server);
 }
 
 static void
@@ -705,6 +740,7 @@ xdg_activation_handle_request(struct wl_listener *listener, void *data)
 
 	wlr_log(WLR_DEBUG, "Activating surface");
 	desktop_focus_view(view, /*raise*/ true);
+        update_fifo_after_action(view->server);
 }
 
 /*
@@ -811,6 +847,7 @@ xdg_surface_new(struct wl_listener *listener, void *data)
 	CONNECT_SIGNAL(xdg_surface, xdg_toplevel_view, new_popup);
 
 	wl_list_insert(&server->views, &view->link);
+        update_fifo_after_action(server);
 }
 
 void
@@ -834,4 +871,3 @@ xdg_shell_init(struct server *server)
 	wl_signal_add(&server->xdg_activation->events.request_activate,
 		&server->xdg_activation_request);
 }
-

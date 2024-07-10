@@ -1,5 +1,7 @@
 // SPDX-License-Identifier: GPL-2.0-only
 #define _POSIX_C_SOURCE 200809L
+#include <fcntl.h>
+#include <wayland-util.h>
 #include <assert.h>
 #include <signal.h>
 #include <string.h>
@@ -721,6 +723,36 @@ start_window_cycling(struct server *server, enum lab_cycle_dir direction)
 	osd_update(server);
 }
 
+static void
+update_fifo_after_action(struct server *server)
+{
+  char msg[8192];
+  strcpy(msg, "{\"workspaces\":[");
+  struct workspace *curr_workspace;
+  wl_list_for_each(curr_workspace, &rc.workspace_config.workspaces, link) {
+    // check for empty and for focus
+    int mask = 0;
+    char mask_msg[256];
+    struct view *view;
+    for_each_view(view, &server->views, LAB_VIEW_CRITERIA_NONE) {
+      if (!strcmp(view->workspace->name, curr_workspace->name)) {
+        mask |= 1;
+        break;
+      }
+    }
+    if (!strcmp(server->workspace_current->name, curr_workspace->name)) {
+      mask |= 2;
+    }
+    snprintf(mask_msg, 256, "{\"name\": \"%s\", \"status\": %d},", curr_workspace->name, mask);
+    strcat(msg, mask_msg);
+  };
+  trim_last_field(msg, ',');
+  strcat(msg, "]}\n");
+  int q_fifo = open("/tmp/labwc.fifo", O_WRONLY | O_NONBLOCK);
+  write(q_fifo, msg, strlen(msg));
+  close(q_fifo);
+}
+
 void
 actions_run(struct view *activator, struct server *server,
 	struct wl_list *actions, uint32_t resize_edges)
@@ -999,6 +1031,7 @@ actions_run(struct view *activator, struct server *server,
 					workspaces_switch_to(target,
 						/*update_focus*/ true);
 				}
+                                update_fifo_after_action(server);
 			}
 			break;
 		case ACTION_TYPE_MOVE_TO_OUTPUT:
